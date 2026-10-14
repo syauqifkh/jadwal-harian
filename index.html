@@ -1,0 +1,935 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f1f4f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#12151b" media="(prefers-color-scheme: dark)">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="description" content="Jadwal harian dua kolom: hari dan task di kiri, waktu di kanan.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Jadwal Harian</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root { color-scheme: light; padding-top: env(safe-area-inset-top, 0px); }
+body { margin: 0; font-size: 14px; }
+[hidden] { display: none !important; }
+/* Layout: satu lembar catatan, dua kolom (hari & task | waktu), bagian hari punya tanggal di kolom kanan, bilah aksi tetap di bawah */
+:root {
+  --bg: #f1f4f8;
+  --sheet: #ffffff;
+  --fg: #1a2230;
+  --mute: #667085;
+  --line: #e0e6ee;
+  --band: #eaf0fb;
+  --hl: #f3f7ff;
+  --accent: #2c5bd1;
+  --accent-fg: #ffffff;
+  --done: #9aa4b5;
+  --danger: #b42318;
+  --ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace;
+  --timew: 8.2rem;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12151b;
+    --sheet: #1a1e26;
+    --fg: #e6eaf2;
+    --mute: #8c96a8;
+    --line: #2a303b;
+    --band: #212a3b;
+    --hl: #212733;
+    --accent: #7ea6ff;
+    --accent-fg: #0c1426;
+    --done: #5c6578;
+    --danger: #ff8a7d;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12151b;
+  --sheet: #1a1e26;
+  --fg: #e6eaf2;
+  --mute: #8c96a8;
+  --line: #2a303b;
+  --band: #212a3b;
+  --hl: #212733;
+  --accent: #7ea6ff;
+  --accent-fg: #0c1426;
+  --done: #5c6578;
+  --danger: #ff8a7d;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui);
+  padding-block: 20px calc(var(--tbh, 76px) + 40px);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+header { display: flex; flex-direction: column; gap: 8px; }
+.eyebrow { font: 500 .78rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--mute); }
+h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: .88rem; color: var(--mute); }
+.meta .grow { flex: 1; }
+.linkbtn {
+  font: 500 .88rem var(--ui); color: var(--accent); background: none; border: 0; padding: 6px 0; cursor: pointer;
+}
+.linkbtn:hover { text-decoration: underline; }
+.bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.chip, .pick {
+  font: 500 .88rem var(--ui); color: var(--fg); background: var(--sheet); border: 1px solid var(--line);
+  border-radius: 8px; min-height: 38px; padding: 0 14px; cursor: pointer;
+}
+.chip[aria-pressed="true"], .pick.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.pick { padding: 0 10px; }
+.pick.on { color-scheme: dark; }
+.tools { display: flex; flex-wrap: wrap; align-items: center; gap: 0 18px; }
+.sw {
+  display: inline-flex; align-items: center; gap: 8px; background: none; border: 0; padding: 6px 0;
+  font: 500 .88rem var(--ui); color: var(--fg); cursor: pointer;
+}
+.sw i { width: 34px; height: 20px; border-radius: 10px; background: var(--line); position: relative; transition: background .15s; flex: none; }
+.sw i::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--mute); transition: transform .15s, background .15s;
+}
+.sw[aria-checked="true"] i { background: var(--accent); }
+.sw[aria-checked="true"] i::after { transform: translateX(14px); background: var(--accent-fg); }
+
+.sheet { background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cols, .row.task, .row.head { display: grid; grid-template-columns: minmax(0, 1fr) var(--timew); }
+.cols {
+  padding: 9px 12px; border-bottom: 1px solid var(--line);
+  font: 500 .72rem/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--mute);
+}
+.cols span:last-child { padding-left: .6rem; }
+.row { padding: 0 12px; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row.head { background: var(--band); border-top: 1px solid var(--line); }
+.row.head:first-child { border-top: 0; }
+.row:focus-within { background: var(--hl); box-shadow: inset 3px 0 0 var(--accent); }
+.row.head:focus-within { background: var(--band); }
+.left { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.txt, .time, .date {
+  font-family: var(--mono); line-height: 1.5rem; color: var(--fg);
+  background: transparent; border: 0; outline: 0; margin: 0; border-radius: 0;
+}
+.txt { flex: 1; min-width: 0; width: 100%; resize: none; overflow: hidden; padding: .4rem .2rem; font-size: .95rem; display: block; }
+.row.head .txt { font-weight: 700; font-size: .84rem; letter-spacing: .09em; text-transform: uppercase; color: var(--accent); }
+.row.head.today .left::after {
+  content: "Hari ini"; flex: none; align-self: center; margin-right: 2px;
+  font: 600 .62rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
+  background: var(--accent); color: var(--accent-fg); padding: 4px 6px; border-radius: 4px;
+}
+.time, .date {
+  width: 100%; min-width: 0; padding: .4rem .2rem .4rem .6rem;
+  border-left: 1px solid var(--line); font-variant-numeric: tabular-nums;
+}
+.time { font-size: .88rem; color: var(--mute); }
+.date { font-size: .78rem; font-weight: 500; color: var(--accent); }
+.time:focus, .date:focus { border-left-color: var(--accent); }
+.time:focus { color: var(--fg); }
+.date::-webkit-calendar-picker-indicator { cursor: pointer; opacity: .7; }
+.txt::placeholder, .time::placeholder { color: var(--done); opacity: .8; }
+.row.done .txt { color: var(--done); text-decoration: line-through; text-decoration-thickness: 1px; }
+.row.done .time { color: var(--done); }
+.row.sub .left { position: relative; padding-left: 1.7rem; }
+.row.sub .left::before { content: ""; position: absolute; left: .72rem; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.row.sub .txt { font-size: .88rem; }
+.row.task[data-subs] .left::after {
+  content: attr(data-subs); flex: none; align-self: center; margin-right: 2px;
+  font: 500 .68rem/1 var(--mono); color: var(--mute); border: 1px solid var(--line); border-radius: 4px; padding: 4px 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chk {
+  flex: none; width: 1.9rem; height: 1.9rem; margin: .1rem 0 0 -.3rem; padding: 0;
+  display: grid; place-items: center; background: none; border: 0; cursor: pointer; border-radius: 6px;
+}
+.chk i {
+  width: 1.05rem; height: 1.05rem; border: 1.5px solid var(--mute); border-radius: 4px; position: relative;
+  transition: background .12s, border-color .12s;
+}
+.chk[aria-checked="true"] i { background: var(--accent); border-color: var(--accent); }
+.chk[aria-checked="true"] i::after {
+  content: ""; position: absolute; left: 4px; top: 0; width: 4px; height: 9px;
+  border: solid var(--accent-fg); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.chk:focus-visible, .tb button:focus-visible, .linkbtn:focus-visible, .toast button:focus-visible,
+.chip:focus-visible, .pick:focus-visible, .sw:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+.empty { padding: 28px 16px; text-align: center; color: var(--mute); font-size: .95rem; }
+
+.tb {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  background: var(--sheet); border-top: 1px solid var(--line);
+  padding-top: 10px;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.tb .in { max-width: 760px; margin: 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tb .sp { flex: 1; }
+.tb button {
+  font: 500 .92rem var(--ui); color: var(--fg); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 8px; min-height: 42px; min-width: 42px; padding: 0 14px; cursor: pointer;
+}
+.tb button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.tb button.danger { color: var(--danger); }
+.tb button:disabled { opacity: .4; cursor: default; }
+
+.toast {
+  position: fixed; z-index: 6; left: 50%; transform: translateX(-50%);
+  bottom: calc(var(--tbh, 76px) + 10px);
+  display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px);
+  background: var(--fg); color: var(--bg); padding: 10px 14px; border-radius: 8px; font-size: .9rem;
+}
+.toast button { font: 600 .9rem var(--ui); color: var(--bg); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 4px; }
+
+@media (max-width: 520px) {
+  :root { --timew: 6.9rem; }
+  h1 { font-size: 1.45rem; }
+  .txt { font-size: .92rem; }
+  .time { font-size: .8rem; padding-left: .5rem; }
+  .date { font-size: .72rem; padding-left: .5rem; }
+  .row.sub .left { padding-left: 1.45rem; }
+  .row.sub .left::before { left: .55rem; }
+  .tb button { padding: 0 11px; }
+  .date::-webkit-calendar-picker-indicator { display: none; }
+  .row { padding: 0 10px; }
+  .cols { padding: 9px 10px; }
+  .cols span:last-child { padding-left: .5rem; }
+}
+@media (prefers-reduced-motion: reduce) { .bar i, .chk i, .sw i, .sw i::after { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow" id="date"></div>
+    <h1>Jadwal Harian</h1>
+    <div class="meta">
+      <span id="count"></span>
+      <span class="grow"></span>
+      <span id="status"></span>
+    </div>
+    <div class="bar" aria-hidden="true"><i id="barfill"></i></div>
+    <div class="filters" role="group" aria-label="Pilih tanggal">
+      <button class="chip" type="button" data-view="all">Semua</button>
+      <button class="chip" type="button" data-view="today">Hari ini</button>
+      <button class="chip" type="button" data-view="tomorrow">Besok</button>
+      <input class="pick" id="pick" type="date" aria-label="Pilih tanggal lain">
+    </div>
+    <div class="tools">
+      <button class="sw" id="autoSw" type="button" role="switch" aria-checked="true" title="Urutkan task per hari berdasarkan jam, dan hari berdasarkan tanggal"><i></i><span>Urut otomatis</span></button>
+      <button class="linkbtn" id="sortNow" type="button">Urutkan sekarang</button>
+      <button class="linkbtn" id="clearDone" type="button">Hapus yang selesai</button>
+      <button class="linkbtn" id="exportBtn" type="button" title="Unduh cadangan jadwal">Ekspor</button>
+      <button class="linkbtn" id="importBtn" type="button" title="Muat jadwal dari file cadangan">Impor</button>
+      <input type="file" id="importFile" accept=".json,application/json" hidden>
+    </div>
+  </header>
+
+  <main class="sheet">
+    <div class="cols"><span>Hari &amp; task</span><span>Waktu</span></div>
+    <div id="rows"></div>
+    <div class="empty" id="empty" hidden></div>
+  </main>
+</div>
+
+<div class="toast" id="toast" role="status" hidden><span></span><button type="button" id="undo">Urungkan</button></div>
+
+<nav class="tb" aria-label="Aksi jadwal">
+  <div class="in">
+    <button type="button" class="primary" data-act="head">+ Hari</button>
+    <button type="button" class="primary" data-act="task">+ Task</button>
+    <button type="button" class="primary" data-act="sub" title="Tambah subtask di bawah task yang dipilih">+ Sub</button>
+    <span class="sp"></span>
+    <button type="button" data-act="outdent" aria-label="Keluarkan dari subtask" title="Keluarkan dari subtask">&larr;</button>
+    <button type="button" data-act="indent" aria-label="Jadikan subtask" title="Jadikan subtask">&rarr;</button>
+    <button type="button" data-act="up" aria-label="Naikkan baris" title="Naikkan">&uarr;</button>
+    <button type="button" data-act="down" aria-label="Turunkan baris" title="Turunkan">&darr;</button>
+    <button type="button" class="danger" data-act="del">Hapus</button>
+  </div>
+</nav>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (s) { return document.querySelector(s); };
+  var uid = function () { return Math.random().toString(36).slice(2, 10); };
+  var LS = 'jadwal-harian-v2', LSV = 'jadwal-harian-view';
+  var DAYS = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+  var DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+  /* ---------- tanggal ---------- */
+  function jakartaToday() {
+    try {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+    } catch (e) { return new Date().toISOString().slice(0, 10); }
+  }
+  function parts(s) { var p = s.split('-'); return [+p[0], +p[1] - 1, +p[2]]; }
+  function addDays(s, n) {
+    var p = parts(s);
+    return new Date(Date.UTC(p[0], p[1], p[2] + n)).toISOString().slice(0, 10);
+  }
+  function weekday(s) {
+    var p = parts(s);
+    return DAYS[new Date(Date.UTC(p[0], p[1], p[2])).getUTCDay()];
+  }
+  function fmtDate(s) {
+    var p = parts(s);
+    try {
+      return new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }).format(new Date(Date.UTC(p[0], p[1], p[2])));
+    } catch (e) { return s; }
+  }
+  try {
+    $('#date').textContent = new Intl.DateTimeFormat('id-ID', {
+      weekday: 'long', day: 'numeric', month: 'long', timeZone: 'Asia/Jakarta'
+    }).format(new Date());
+  } catch (e) { $('#date').textContent = 'Hari ini'; }
+
+  /* ---------- data awal ---------- */
+  var SEED = (function () {
+    var t = jakartaToday(), b = addDays(t, 1);
+    return [
+      ['head', weekday(t), '', t],
+      ['task', 'Contoh: ketuk baris ini lalu ubah teksnya', '07.00'],
+      ['task', 'Ketuk kotak di kiri untuk menandai selesai', '08.30-10.30'],
+      ['task', 'Ini subtask, ikut task di atasnya', '', '', true],
+      ['task', 'Tekan Enter atau + Task untuk baris baru', '12.00'],
+      ['head', weekday(b), '', b],
+      ['task', 'Pilih tanggal di kolom kanan judul hari', '09.00'],
+      ['task', 'Hapus contoh ini, lalu tulis jadwal Anda']
+    ].map(function (a) {
+      return { id: uid(), type: a[0], text: a[1], time: a[2] || '', date: a[3] || '', done: false, sub: a[4] === true };
+    });
+  })();
+
+  function clean(list) {
+    if (!Array.isArray(list)) return null;
+    return list.map(function (r) {
+      r = r || {};
+      var id = String(r.id || '').replace(/[^\w-]/g, '') || uid();
+      var head = r.type === 'head';
+      return {
+        id: id,
+        type: head ? 'head' : 'task',
+        text: typeof r.text === 'string' ? r.text : '',
+        time: typeof r.time === 'string' ? r.time : '',
+        date: head && typeof r.date === 'string' && DATE_RE.test(r.date) ? r.date : '',
+        done: r.done === true,
+        sub: !head && r.sub === true
+      };
+    }).map(function (r, i, a) {
+      if (r.sub && (i === 0 || a[i - 1].type === 'head')) r.sub = false;
+      return r;
+    });
+  }
+
+  var rows = SEED, auto = true, view = 'all';
+  try {
+    var c = JSON.parse(localStorage.getItem(LS));
+    var cr = clean(c && c.rows);
+    if (cr && cr.length) { rows = cr; auto = c.auto !== false; }
+  } catch (e) {}
+  try {
+    var sv = localStorage.getItem(LSV);
+    if (sv === 'all' || sv === 'today' || sv === 'tomorrow' || (sv && DATE_RE.test(sv))) view = sv;
+  } catch (e) {}
+
+  var activeId = null, dirty = false, saving = false, again = false, rev = 0;
+  var ref = null, undoRows = null, saveTimer = 0, toastTimer = 0;
+  var host = $('#rows');
+
+  /* ---------- penyimpanan ---------- */
+  function setStatus(t) { $('#status').textContent = t; }
+
+  function cacheLocal() {
+    try { localStorage.setItem(LS, JSON.stringify({ rows: rows, auto: auto })); } catch (e) {}
+  }
+
+  function touch() {
+    dirty = true; rev++;
+    setStatus('Menyimpan…');
+    cacheLocal();
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, 600);
+  }
+
+  function flush() {
+    if (!ref) { dirty = false; setStatus('Tersimpan di perangkat ini'); return; }
+    if (saving) { again = true; return; }
+    saving = true;
+    var mine = rev;
+    ref.set({ v: 2, mig: 1, auto: auto, rows: JSON.parse(JSON.stringify(rows)) }).then(function () {
+      setStatus('Tersimpan');
+    }, function (e) {
+      setStatus(e && e.code === 'invalid_argument' ? 'Hanya bisa dilihat' : 'Belum tersimpan di server');
+    }).then(function () {
+      saving = false;
+      if (again) { again = false; flush(); }
+      else if (mine === rev) dirty = false;
+    });
+  }
+
+  /* ---------- pengurutan ---------- */
+  function timeKey(s) {
+    var m = /^\s*(\d{1,2})(?:[.:](\d{2}))?/.exec(s || '');
+    if (!m) return null;
+    var h = +m[1], mi = m[2] ? +m[2] : 0;
+    if (h > 24 || mi > 59) return null;
+    return h * 60 + mi;
+  }
+
+  /* Task berjam diurutkan; task tanpa jam ikut task berjam di atasnya. */
+  function sortTasks(items) {
+    var lead = [], groups = [], g = null;
+    items.forEach(function (t) {
+      var k = timeKey(t.time);
+      if (k !== null && !t.sub) { g = { k: k, items: [t] }; groups.push(g); }
+      else if (g) g.items.push(t);
+      else lead.push(t);
+    });
+    groups.sort(function (a, b) { return a.k - b.k; });
+    return groups.reduce(function (acc, x) { return acc.concat(x.items); }, lead);
+  }
+
+  /* Hari diurutkan menurut tanggal; hari tanpa tanggal ditaruh paling bawah. */
+  function sortRows() {
+    var lead = [], secs = [], cur = null;
+    rows.forEach(function (r) {
+      if (r.type === 'head') { cur = { head: r, items: [] }; secs.push(cur); }
+      else if (cur) cur.items.push(r);
+      else lead.push(r);
+    });
+    secs.forEach(function (s) { s.items = sortTasks(s.items); });
+    var dated = secs.filter(function (s) { return s.head.date; });
+    var undated = secs.filter(function (s) { return !s.head.date; });
+    dated.sort(function (a, b) { return a.head.date < b.head.date ? -1 : a.head.date > b.head.date ? 1 : 0; });
+    var out = lead.slice();
+    dated.concat(undated).forEach(function (s) { out.push(s.head); out.push.apply(out, s.items); });
+    rows = out;
+  }
+  function order() { return rows.map(function (r) { return r.id; }).join(','); }
+
+  /* ---------- tampilan per tanggal ---------- */
+  function targetDate() {
+    if (view === 'today') return jakartaToday();
+    if (view === 'tomorrow') return addDays(jakartaToday(), 1);
+    if (DATE_RE.test(view)) return view;
+    return null;
+  }
+
+  function visibleRows() {
+    var t = targetDate();
+    if (!t) return rows;
+    var out = [], show = false;
+    rows.forEach(function (r) {
+      if (r.type === 'head') show = r.date === t;
+      if (show) out.push(r);
+    });
+    return out;
+  }
+
+  function syncControls() {
+    document.querySelectorAll('.chip').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.view === view));
+    });
+    var pick = $('#pick');
+    var custom = DATE_RE.test(view);
+    pick.value = custom ? view : '';
+    pick.classList.toggle('on', custom);
+    $('#autoSw').setAttribute('aria-checked', String(auto));
+  }
+
+  function setView(v) {
+    view = v;
+    try { localStorage.setItem(LSV, v); } catch (e) {}
+    syncControls(); render();
+  }
+
+  /* ---------- baris ---------- */
+  function autosize(t) {
+    t.style.height = 'auto';
+    t.style.height = t.scrollHeight + 'px';
+  }
+
+  function rowEl(r, today) {
+    var el = document.createElement('div');
+    el.className = 'row ' + r.type + (r.sub ? ' sub' : '') + (r.done ? ' done' : '');
+    el.dataset.id = r.id;
+    var left = document.createElement('div');
+    left.className = 'left';
+    if (r.type === 'task') {
+      var b = document.createElement('button');
+      b.type = 'button'; b.className = 'chk';
+      b.setAttribute('role', 'checkbox');
+      b.setAttribute('aria-checked', String(r.done));
+      b.setAttribute('aria-label', 'Tandai selesai');
+      b.appendChild(document.createElement('i'));
+      left.appendChild(b);
+    }
+    var t = document.createElement('textarea');
+    t.className = 'txt'; t.rows = 1; t.value = r.text; t.spellcheck = false;
+    t.placeholder = r.type === 'head' ? 'Nama hari' : (r.sub ? 'Tulis subtask' : 'Tulis task');
+    t.setAttribute('aria-label', r.type === 'head' ? 'Nama hari' : (r.sub ? 'Subtask' : 'Task'));
+    left.appendChild(t);
+    el.appendChild(left);
+    if (r.type === 'task') {
+      var i = document.createElement('input');
+      i.className = 'time'; i.type = 'text'; i.value = r.time; i.placeholder = 'jam';
+      i.maxLength = 24; i.autocomplete = 'off'; i.spellcheck = false;
+      i.setAttribute('aria-label', 'Waktu');
+      el.appendChild(i);
+    } else {
+      var d = document.createElement('input');
+      d.className = 'date'; d.type = 'date'; d.value = r.date || '';
+      d.setAttribute('aria-label', 'Tanggal');
+      el.appendChild(d);
+      if (r.date && r.date === today) el.classList.add('today');
+    }
+    return el;
+  }
+
+  function updateCount(vis) {
+    var tasks = vis.filter(function (r) { return r.type === 'task'; });
+    var done = tasks.filter(function (r) { return r.done; }).length;
+    $('#count').textContent = tasks.length ? done + ' dari ' + tasks.length + ' task selesai' : 'Belum ada task';
+    $('#barfill').style.width = (tasks.length ? Math.round(done / tasks.length * 100) : 0) + '%';
+    $('#clearDone').hidden = done === 0;
+  }
+
+  function updateToolbar() {
+    var q = function (a) { return document.querySelector('[data-act="' + a + '"]'); };
+    var i = indexOf(activeId);
+    var has = i >= 0 && visibleRows().some(function (r) { return r.id === activeId; });
+    q('up').disabled = !movePlan(-1);
+    q('down').disabled = !movePlan(1);
+    q('del').disabled = !has;
+    q('indent').disabled = !canSub(activeId, true);
+    q('outdent').disabled = !canSub(activeId, false);
+    q('sub').disabled = !(has && rows[i].type === 'task');
+  }
+
+  /* Satu blok = hari beserta isinya, atau task beserta subtask-nya. */
+  function blockEnd(i) {
+    var r = rows[i], j = i + 1;
+    if (r.type === 'head') { while (j < rows.length && rows[j].type !== 'head') j++; }
+    else if (!r.sub) { while (j < rows.length && rows[j].type === 'task' && rows[j].sub) j++; }
+    return j;
+  }
+
+  function canSub(id, on) {
+    var i = indexOf(id);
+    if (i < 0 || rows[i].type !== 'task') return false;
+    if (!visibleRows().some(function (r) { return r.id === id; })) return false;
+    if (!on) return rows[i].sub === true;
+    var p = rows[i - 1];
+    return !rows[i].sub && !!p && p.type === 'task';
+  }
+
+  function setSub(id, on) {
+    if (!canSub(id, on)) return;
+    var f = captureFocus() || { id: id, field: 'txt' };
+    rows[indexOf(id)].sub = on;
+    if (auto) sortRows();
+    touch(); render(f);
+  }
+
+  function addSub() {
+    var i = indexOf(activeId);
+    if (i < 0 || rows[i].type !== 'task') { showToast('Pilih task dulu untuk menambah subtask', false); return; }
+    insertAfter(activeId, 'task', true);
+  }
+
+  function movePlan(dir) {
+    var i = indexOf(activeId);
+    var vid = {};
+    visibleRows().forEach(function (r) { vid[r.id] = 1; });
+    if (i < 0 || !vid[activeId]) return null;
+    var r = rows[i], n;
+    if (r.type === 'task' && r.sub) {
+      n = rows[i + dir];
+      if (!n || n.type !== 'task' || !n.sub || !vid[n.id]) return null;
+      var a = Math.min(i, i + dir);
+      return { s: a, m: a + 1, e: a + 2 };
+    }
+    var j = blockEnd(i);
+    if (dir > 0) {
+      if (j >= rows.length || !vid[rows[j].id]) return null;
+      return { s: i, m: j, e: rows[j].type === 'head' && r.type !== 'head' ? j + 1 : blockEnd(j) };
+    }
+    var q = i - 1;
+    if (r.type === 'head') { while (q >= 0 && rows[q].type !== 'head') q--; }
+    else { while (q >= 0 && rows[q].type === 'task' && rows[q].sub) q--; }
+    if (q < 0 || !vid[rows[q].id]) return null;
+    return { s: q, m: i, e: j };
+  }
+
+  /* Penanda "1/3" pada task yang punya subtask. */
+  function badges() {
+    var vis = visibleRows(), cur = null, n = 0, d = 0;
+    function put() {
+      if (!cur) return;
+      var el = host.querySelector('[data-id="' + cur + '"]');
+      if (!el) return;
+      if (n) el.dataset.subs = d + '/' + n; else delete el.dataset.subs;
+    }
+    vis.forEach(function (r) {
+      if (r.type === 'head') { put(); cur = null; n = 0; d = 0; }
+      else if (!r.sub) { put(); cur = r.id; n = 0; d = 0; }
+      else if (cur) { n++; if (r.done) d++; }
+    });
+    put();
+  }
+
+  function captureFocus() {
+    var a = document.activeElement;
+    if (!a || !host.contains(a)) return null;
+    var row = a.closest('.row');
+    if (!row) return null;
+    var f = ['txt', 'time', 'date', 'chk'].find(function (c) { return a.classList.contains(c); });
+    if (!f) return null;
+    var s = null, e = null;
+    try { s = a.selectionStart; e = a.selectionEnd; } catch (x) {}
+    return { id: row.dataset.id, field: f, start: s, end: e };
+  }
+
+  function render(focus) {
+    var vis = visibleRows(), today = jakartaToday();
+    host.replaceChildren.apply(host, vis.map(function (r) { return rowEl(r, today); }));
+    host.querySelectorAll('textarea').forEach(autosize);
+    var empty = $('#empty');
+    empty.hidden = vis.length > 0;
+    if (!vis.length) {
+      var t = targetDate();
+      empty.textContent = rows.length && t
+        ? 'Belum ada jadwal pada ' + fmtDate(t) + '. Tekan “+ Hari” untuk menambahkan.'
+        : 'Jadwal masih kosong. Tekan “+ Hari” untuk mulai menulis.';
+    }
+    updateCount(vis);
+    badges();
+    if (focus) {
+      var el = host.querySelector('[data-id="' + focus.id + '"] .' + (focus.field || 'txt'));
+      if (el) {
+        el.focus();
+        try {
+          var n = el.value.length;
+          el.setSelectionRange(focus.start == null ? n : focus.start, focus.end == null ? n : focus.end);
+        } catch (e) {}
+      }
+    }
+    updateToolbar();
+  }
+
+  /* ---------- aksi ---------- */
+  function indexOf(id) { return rows.findIndex(function (r) { return r.id === id; }); }
+  function newRow(type) { return { id: uid(), type: type, text: '', time: '', date: '', done: false, sub: false }; }
+
+  function insertAfter(id, type, sub) {
+    if (auto) sortRows();
+    var i = indexOf(id), nr = newRow(type || 'task');
+    nr.sub = !!sub && nr.type === 'task';
+    var pos;
+    if (i < 0) pos = rows.length;
+    else if (rows[i].type !== 'task') pos = i + 1;
+    else {
+      var p = i;
+      while (p > 0 && rows[p].type === 'task' && rows[p].sub) p--;
+      pos = nr.sub && rows[i].sub ? i + 1 : blockEnd(p);
+    }
+    rows.splice(pos, 0, nr);
+    activeId = nr.id;
+    touch(); render({ id: nr.id });
+  }
+
+  function addHead() {
+    var t = targetDate();
+    if (!t) {
+      var last = '';
+      rows.forEach(function (r) { if (r.type === 'head' && r.date && r.date > last) last = r.date; });
+      t = last ? addDays(last, 1) : jakartaToday();
+    }
+    var nr = newRow('head');
+    nr.date = t; nr.text = weekday(t);
+    rows.push(nr); activeId = nr.id;
+    if (auto) sortRows();
+    touch(); render({ id: nr.id });
+  }
+
+  function addTask() {
+    var vis = visibleRows();
+    if (activeId && vis.some(function (r) { return r.id === activeId; })) { insertAfter(activeId, 'task'); return; }
+    var t = targetDate();
+    if (t && !vis.length) {
+      var h = newRow('head'); h.date = t; h.text = weekday(t);
+      rows.push(h); vis = [h];
+    }
+    insertAfter(vis.length ? vis[vis.length - 1].id : null, 'task');
+  }
+
+  function removeRow(id, fromKey) {
+    var i = indexOf(id);
+    if (i < 0) return;
+    var r = rows[i], count = blockEnd(i) - i;
+    if (fromKey && count > 1) return;
+    var vis = visibleRows();
+    var k = vis.findIndex(function (x) { return x.id === id; });
+    var nb = vis[k - 1] || vis[k + count] || null;
+    undoRows = JSON.stringify(rows);
+    rows.splice(i, count);
+    activeId = nb ? nb.id : null;
+    touch(); render(nb ? { id: nb.id } : null);
+    showToast(count > 1
+      ? (r.type === 'head' ? 'Hari dan ' + (count - 1) + ' task dihapus' : 'Task dan ' + (count - 1) + ' subtask dihapus')
+      : 'Baris dihapus', true);
+  }
+
+  function move(dir) {
+    var p = movePlan(dir);
+    if (!p) return;
+    var x = rows.slice(p.s, p.m), y = rows.slice(p.m, p.e);
+    rows.splice.apply(rows, [p.s, p.e - p.s].concat(y, x));
+    touch(); render({ id: activeId });
+  }
+
+  function showToast(msg, canUndo) {
+    var t = $('#toast');
+    t.querySelector('span').textContent = msg;
+    $('#undo').hidden = !canUndo;
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { t.hidden = true; }, 6000);
+  }
+
+  function resort() {
+    setTimeout(function () {
+      var f = captureFocus(), before = order();
+      sortRows();
+      if (order() !== before) { touch(); render(f); }
+    }, 0);
+  }
+
+  $('#undo').addEventListener('click', function () {
+    if (!undoRows) return;
+    rows = clean(JSON.parse(undoRows)); undoRows = null;
+    $('#toast').hidden = true;
+    touch(); render();
+  });
+
+  $('#clearDone').addEventListener('click', function () {
+    var ids = {};
+    visibleRows().forEach(function (r) { ids[r.id] = 1; });
+    var out = [], n = 0, i = 0;
+    while (i < rows.length) {
+      var r = rows[i];
+      if (r.type === 'task' && !r.sub && ids[r.id]) {
+        var e = blockEnd(i), blk = rows.slice(i, e);
+        if (blk.every(function (x) { return x.done; })) { n += blk.length; i = e; continue; }
+        out.push(r);
+        for (var k = i + 1; k < e; k++) {
+          if (rows[k].done && ids[rows[k].id]) n++; else out.push(rows[k]);
+        }
+        i = e; continue;
+      }
+      out.push(r); i++;
+    }
+    if (!n) return;
+    undoRows = JSON.stringify(rows);
+    rows = out;
+    touch(); render();
+    showToast(n + ' task selesai dihapus', true);
+  });
+
+  $('#sortNow').addEventListener('click', function () {
+    var before = order();
+    undoRows = JSON.stringify(rows);
+    sortRows();
+    if (order() === before) { showToast('Jadwal sudah urut', false); return; }
+    touch(); render(captureFocus());
+    showToast('Jadwal diurutkan', true);
+  });
+
+  $('#autoSw').addEventListener('click', function () {
+    auto = !auto;
+    if (auto) {
+      var before = order();
+      undoRows = JSON.stringify(rows);
+      sortRows();
+      if (order() !== before) showToast('Jadwal diurutkan', true);
+    }
+    touch(); syncControls(); render(captureFocus());
+  });
+
+  document.querySelectorAll('.chip').forEach(function (b) {
+    b.addEventListener('click', function () { setView(b.dataset.view); });
+  });
+  $('#pick').addEventListener('change', function (e) {
+    setView(DATE_RE.test(e.target.value) ? e.target.value : 'all');
+  });
+
+  var tb = document.querySelector('.tb');
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(function () {
+      document.documentElement.style.setProperty('--tbh', tb.offsetHeight + 'px');
+    }).observe(tb);
+  }
+  tb.addEventListener('mousedown', function (e) { e.preventDefault(); });
+  tb.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]');
+    if (!b || b.disabled) return;
+    var a = b.dataset.act;
+    if (a === 'head') addHead();
+    else if (a === 'task') addTask();
+    else if (a === 'sub') addSub();
+    else if (a === 'indent') setSub(activeId, true);
+    else if (a === 'outdent') setSub(activeId, false);
+    else if (a === 'up') move(-1);
+    else if (a === 'down') move(1);
+    else if (a === 'del') removeRow(activeId, false);
+  });
+
+  /* ---------- event pada baris ---------- */
+  function rowOf(el) {
+    var d = el.closest('.row');
+    if (!d) return null;
+    var i = indexOf(d.dataset.id);
+    return i < 0 ? null : { el: d, i: i, r: rows[i] };
+  }
+
+  host.addEventListener('input', function (e) {
+    var o = rowOf(e.target);
+    if (!o) return;
+    if (e.target.classList.contains('txt')) { o.r.text = e.target.value; autosize(e.target); }
+    else if (e.target.classList.contains('time')) o.r.time = e.target.value;
+    else return;
+    touch();
+  });
+
+  host.addEventListener('change', function (e) {
+    var o = rowOf(e.target);
+    if (!o) return;
+    if (e.target.classList.contains('time')) {
+      if (auto) resort();
+    } else if (e.target.classList.contains('date')) {
+      var f = captureFocus();
+      var v = DATE_RE.test(e.target.value) ? e.target.value : '';
+      o.r.date = v;
+      if (v) {
+        var t = (o.r.text || '').trim();
+        if (!t || DAYS.indexOf(t) >= 0) o.r.text = weekday(v);
+      }
+      if (auto) sortRows();
+      touch(); render(f);
+    }
+  });
+
+  host.addEventListener('keydown', function (e) {
+    var o = rowOf(e.target);
+    if (!o || e.isComposing) return;
+    var isTxt = e.target.classList.contains('txt');
+    var isTime = e.target.classList.contains('time');
+    if (e.key === 'Enter' && !e.shiftKey && (isTxt || isTime)) {
+      e.preventDefault();
+      if (o.r.type === 'task' && o.r.sub && isTxt && o.r.text === '') setSub(o.r.id, false);
+      else insertAfter(o.r.id, 'task', o.r.type === 'task' && o.r.sub);
+    } else if (e.key === 'Tab' && isTxt && o.r.type === 'task' && canSub(o.r.id, !e.shiftKey)) {
+      e.preventDefault();
+      setSub(o.r.id, !e.shiftKey);
+    } else if (e.key === 'Backspace' && isTxt && e.target.value === '' && rows.length > 1) {
+      e.preventDefault();
+      removeRow(o.r.id, true);
+    }
+  });
+
+  host.addEventListener('focusin', function (e) {
+    var o = rowOf(e.target);
+    if (!o) return;
+    activeId = o.r.id;
+    updateToolbar();
+  });
+
+  host.addEventListener('click', function (e) {
+    var b = e.target.closest('.chk');
+    if (!b) return;
+    var o = rowOf(b);
+    if (!o) return;
+    o.r.done = !o.r.done;
+    o.el.classList.toggle('done', o.r.done);
+    b.setAttribute('aria-checked', String(o.r.done));
+    activeId = o.r.id; updateToolbar(); updateCount(visibleRows()); badges();
+    touch();
+  });
+
+  window.addEventListener('resize', function () {
+    host.querySelectorAll('textarea').forEach(autosize);
+  });
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { host.querySelectorAll('textarea').forEach(autosize); });
+  }
+
+  syncControls();
+  render();
+
+  /* ---------- penyimpanan di perangkat ---------- */
+  setStatus('Tersimpan di perangkat ini');
+
+  $('#exportBtn').addEventListener('click', function () {
+    var data = JSON.stringify({ v: 2, auto: auto, rows: rows }, null, 2);
+    var link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([data], { type: 'application/json' }));
+    link.download = 'jadwal-harian-' + jakartaToday() + '.json';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(link.href); }, 4000);
+    showToast('Cadangan jadwal diunduh', false);
+  });
+
+  $('#importBtn').addEventListener('click', function () { $('#importFile').click(); });
+
+  $('#importFile').addEventListener('change', function (e) {
+    var f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var d = JSON.parse(String(rd.result));
+        var next = clean(Array.isArray(d) ? d : d && d.rows);
+        if (!next) throw new Error('format');
+        undoRows = JSON.stringify(rows);
+        rows = next;
+        auto = !(d && d.auto === false);
+        activeId = null;
+        touch(); syncControls(); render();
+        showToast('Jadwal diimpor: ' + next.length + ' baris', true);
+      } catch (x) {
+        showToast('File tidak bisa dibaca. Pilih file cadangan jadwal (.json).', false);
+      }
+    };
+    rd.readAsText(f);
+  });
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('./sw.js').catch(function () {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
