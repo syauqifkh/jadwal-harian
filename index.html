@@ -213,6 +213,23 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
   .cols span:last-child { padding-left: .5rem; }
 }
 @media (prefers-reduced-motion: reduce) { .bar i, .chk i, .sw i, .sw i::after { transition: none; } }
+
+.acct {
+  display: flex; flex-direction: column; gap: 8px; max-width: 420px;
+  background: var(--sheet); border: 1px solid var(--line); border-radius: 8px; padding: 14px;
+}
+.acct-h { margin: 0; font: 600 .95rem/1.3 var(--ui); }
+.acct label { font: 500 .8rem var(--ui); color: var(--mute); }
+.acct input {
+  font: 400 1rem var(--ui); color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; min-height: 44px; padding: 0 12px; width: 100%;
+}
+.acct input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.acct-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 4px; }
+.acct .chip:disabled { opacity: .5; cursor: default; }
+.pbtn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.acct-msg { margin: 0; font-size: .86rem; line-height: 1.4; color: var(--mute); min-height: 1.2em; }
+.acct-msg.bad { color: var(--danger); }
 </style>
 </head>
 <body>
@@ -224,7 +241,21 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
       <span id="count"></span>
       <span class="grow"></span>
       <span id="status"></span>
+      <button class="linkbtn" id="acctBtn" type="button" hidden>Masuk</button>
     </div>
+    <form class="acct" id="acctPanel" hidden novalidate>
+      <p class="acct-h">Masuk untuk menyamakan jadwal di semua perangkat</p>
+      <label for="acctEmail">Email</label>
+      <input id="acctEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false">
+      <label for="acctPass">Password (minimal 6 karakter)</label>
+      <input id="acctPass" type="password" autocomplete="current-password">
+      <div class="acct-row">
+        <button class="chip pbtn" id="doLogin" type="submit">Masuk</button>
+        <button class="chip" id="doSignup" type="button">Buat akun baru</button>
+        <button class="linkbtn" id="doReset" type="button">Lupa password</button>
+      </div>
+      <p class="acct-msg" id="acctMsg" role="status"></p>
+    </form>
     <div class="bar" aria-hidden="true"><i id="barfill"></i></div>
     <div class="filters" role="group" aria-label="Pilih tanggal">
       <button class="chip" type="button" data-view="all">Semua</button>
@@ -265,6 +296,7 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
   </div>
 </nav>
 
+<script src="firebase-config.js"></script>
 <script>
 (function () {
   'use strict';
@@ -355,33 +387,57 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
   var host = $('#rows');
 
   /* ---------- penyimpanan ---------- */
-  function setStatus(t) { $('#status').textContent = t; }
+  var PEND = 'jadwal-harian-pending';
+  var sync = { ready: false, user: null, ref: null, unsub: null, first: true, online: navigator.onLine !== false, err: '', auth: null, db: null };
+
+  function getPend() { try { return localStorage.getItem(PEND) || ''; } catch (e) { return ''; } }
+  function setPend(v) { try { if (v) localStorage.setItem(PEND, v); else localStorage.removeItem(PEND); } catch (e) {} }
+
+  function showStatus() {
+    var t;
+    if (!sync.ready) t = 'Tersimpan di perangkat ini';
+    else if (!sync.user) t = 'Belum masuk · tersimpan di perangkat ini';
+    else if (sync.err) t = sync.err;
+    else if (dirty || saving) t = sync.online ? 'Menyinkronkan…' : 'Offline · dikirim saat online';
+    else t = sync.online ? 'Tersinkron' : 'Offline · tersimpan di perangkat ini';
+    $('#status').textContent = t;
+  }
 
   function cacheLocal() {
     try { localStorage.setItem(LS, JSON.stringify({ rows: rows, auto: auto })); } catch (e) {}
   }
 
+  function cloudMsg(e) {
+    var c = (e && e.code) || '';
+    if (c === 'permission-denied') return 'Ditolak server. Periksa aturan Firestore (lihat panduan).';
+    if (c === 'not-found' || c === 'failed-precondition') return 'Database Firestore belum dibuat (lihat panduan).';
+    if (c === 'resource-exhausted') return 'Kuota harian Firebase habis. Coba lagi besok.';
+    return 'Gagal menyinkronkan';
+  }
+
   function touch() {
     dirty = true; rev++;
-    setStatus('Menyimpan…');
+    setPend(sync.user ? sync.user.uid : 'local');
     cacheLocal();
+    showStatus();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(flush, 600);
   }
 
   function flush() {
-    if (!ref) { dirty = false; setStatus('Tersimpan di perangkat ini'); return; }
+    if (!sync.ref) { dirty = false; showStatus(); return; }
     if (saving) { again = true; return; }
-    saving = true;
-    var mine = rev;
-    ref.set({ v: 2, mig: 1, auto: auto, rows: JSON.parse(JSON.stringify(rows)) }).then(function () {
-      setStatus('Tersimpan');
+    saving = true; sync.err = ''; showStatus();
+    var mine = rev, failed = false;
+    sync.ref.set({ v: 2, auto: auto, rows: JSON.parse(JSON.stringify(rows)) }).then(function () {
+      if (mine === rev) setPend('');
     }, function (e) {
-      setStatus(e && e.code === 'invalid_argument' ? 'Hanya bisa dilihat' : 'Belum tersimpan di server');
+      failed = true; sync.err = cloudMsg(e);
     }).then(function () {
       saving = false;
       if (again) { again = false; flush(); }
-      else if (mine === rev) dirty = false;
+      else if (!failed && mine === rev) dirty = false;
+      showStatus();
     });
   }
 
@@ -884,9 +940,166 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
   syncControls();
   render();
 
-  /* ---------- penyimpanan di perangkat ---------- */
-  setStatus('Tersimpan di perangkat ini');
+  /* ---------- akun & sinkronisasi (Firebase) ---------- */
+  var SDK = 'https://www.gstatic.com/firebasejs/10.14.1/';
 
+  function loadScript(src) {
+    return new Promise(function (ok, no) {
+      var s = document.createElement('script');
+      s.src = src; s.crossOrigin = 'anonymous'; s.onload = ok; s.onerror = no;
+      document.head.appendChild(s);
+    });
+  }
+  function loadSdk() {
+    var f = window.firebase;
+    if (f && f.initializeApp && f.auth && f.firestore) return Promise.resolve();
+    return loadScript(SDK + 'firebase-app-compat.js').then(function () {
+      return Promise.all([loadScript(SDK + 'firebase-auth-compat.js'), loadScript(SDK + 'firebase-firestore-compat.js')]);
+    });
+  }
+  function cfgOk() {
+    var c = window.FIREBASE_CONFIG;
+    return !!(c && c.apiKey && c.projectId && c.appId && !/ISI_/.test(c.apiKey + c.projectId + c.appId));
+  }
+
+  function authMsg(e) {
+    var c = (e && e.code) || '';
+    var m = {
+      'auth/invalid-email': 'Format email tidak benar.',
+      'auth/missing-email': 'Isi email dulu.',
+      'auth/missing-password': 'Isi password dulu.',
+      'auth/weak-password': 'Password terlalu pendek. Pakai minimal 6 karakter.',
+      'auth/email-already-in-use': 'Email ini sudah terdaftar. Tekan Masuk.',
+      'auth/invalid-credential': 'Email atau password salah. Kalau belum punya akun, tekan Buat akun baru.',
+      'auth/wrong-password': 'Password salah.',
+      'auth/user-not-found': 'Email belum terdaftar. Tekan Buat akun baru.',
+      'auth/too-many-requests': 'Terlalu banyak percobaan. Tunggu beberapa menit, lalu coba lagi.',
+      'auth/network-request-failed': 'Tidak ada koneksi internet.',
+      'auth/operation-not-allowed': 'Pendaftaran atau login email belum diaktifkan di Firebase (lihat panduan).',
+      'auth/admin-restricted-operation': 'Pendaftaran akun baru sedang dimatikan di Firebase.',
+      'auth/invalid-api-key': 'Kode di firebase-config.js salah. Salin ulang dari Firebase.',
+      'auth/api-key-not-valid': 'Kode di firebase-config.js salah. Salin ulang dari Firebase.'
+    };
+    return m[c] || 'Gagal masuk' + (c ? ' (' + c + ')' : '') + '.';
+  }
+
+  function msg(t, bad) {
+    var m = $('#acctMsg');
+    m.textContent = t;
+    m.className = 'acct-msg' + (bad ? ' bad' : '');
+  }
+  function busy(on) {
+    ['#doLogin', '#doSignup', '#doReset'].forEach(function (s) { $(s).disabled = on; });
+  }
+
+  function acctUi() {
+    var b = $('#acctBtn');
+    b.hidden = !sync.ready;
+    b.textContent = sync.user ? 'Keluar' : 'Masuk';
+    b.title = sync.user ? (sync.user.email || '') : 'Masuk untuk menyamakan jadwal di semua perangkat';
+    if (sync.user) { $('#acctPanel').hidden = true; msg(''); }
+  }
+
+  function stopSync() {
+    if (sync.unsub) { try { sync.unsub(); } catch (e) {} }
+    sync.unsub = null; sync.ref = null; sync.user = null; sync.err = '';
+    acctUi(); showStatus();
+  }
+
+  function startSync(user) {
+    stopSync();
+    sync.user = user; sync.first = true;
+    sync.ref = sync.db.collection('schedules').doc(user.uid);
+    sync.unsub = sync.ref.onSnapshot(onCloud, function (e) { sync.err = cloudMsg(e); showStatus(); });
+    acctUi(); showStatus();
+  }
+
+  function onCloud(snap) {
+    if (snap.metadata.fromCache || snap.metadata.hasPendingWrites) return;
+    sync.err = '';
+    var first = sync.first; sync.first = false;
+    var uid = sync.user ? sync.user.uid : '';
+    if (!snap.exists) {
+      /* Akun baru: kirim jadwal di perangkat ini sebagai isi awal. */
+      if (!dirty && !saving) { dirty = true; rev++; flush(); }
+      showStatus(); return;
+    }
+    var d = snap.data() || {}, next = clean(d.rows);
+    if (!next) { showStatus(); return; }
+    var nextAuto = d.auto !== false;
+    var same = JSON.stringify(next) === JSON.stringify(rows) && nextAuto === auto;
+    var pv = getPend();
+    if (first && pv === uid && !same) {
+      /* Ada perubahan yang dibuat saat offline dan belum terkirim: kirim sekarang. */
+      if (!dirty && !saving) { dirty = true; rev++; flush(); }
+      showStatus(); return;
+    }
+    if (dirty || saving) { showStatus(); return; }
+    if (same) { if (first) setPend(''); showStatus(); return; }
+    if (first && pv) {
+      /* Perangkat ini punya isi yang belum pernah masuk akun: simpan salinannya supaya bisa diurungkan. */
+      undoRows = JSON.stringify(rows);
+      showToast('Jadwal dari akun dimuat', true);
+    }
+    rows = next; auto = nextAuto; setPend('');
+    cacheLocal();
+    var f = captureFocus();
+    if (indexOf(activeId) < 0) activeId = null;
+    syncControls(); render(f);
+    showStatus();
+  }
+
+  function authDo(kind) {
+    if (!sync.ready) return;
+    var email = $('#acctEmail').value.trim(), pass = $('#acctPass').value;
+    if (!email) { msg('Isi email dulu.', true); return; }
+    if (kind !== 'reset' && !pass) { msg('Isi password dulu.', true); return; }
+    busy(true); msg(kind === 'reset' ? 'Mengirim…' : 'Memproses…');
+    var p = kind === 'signup' ? sync.auth.createUserWithEmailAndPassword(email, pass)
+      : kind === 'reset' ? sync.auth.sendPasswordResetEmail(email)
+      : sync.auth.signInWithEmailAndPassword(email, pass);
+    p.then(function () {
+      if (kind === 'reset') msg('Email untuk mengatur ulang password sudah dikirim. Cek juga folder Spam.');
+      else { $('#acctPass').value = ''; msg(''); }
+    }, function (e) { msg(authMsg(e), true); }).then(function () { busy(false); });
+  }
+
+  $('#acctBtn').addEventListener('click', function () {
+    if (!sync.ready) return;
+    if (sync.user) {
+      sync.auth.signOut();
+      showToast('Anda keluar. Jadwal tetap ada di perangkat ini.', false);
+      return;
+    }
+    var p = $('#acctPanel');
+    p.hidden = !p.hidden;
+    if (!p.hidden) $('#acctEmail').focus();
+  });
+  $('#acctPanel').addEventListener('submit', function (e) { e.preventDefault(); authDo('login'); });
+  $('#doSignup').addEventListener('click', function () { authDo('signup'); });
+  $('#doReset').addEventListener('click', function () { authDo('reset'); });
+
+  window.addEventListener('online', function () {
+    sync.online = true;
+    if (sync.ref && dirty && !saving) flush();
+    showStatus();
+  });
+  window.addEventListener('offline', function () { sync.online = false; showStatus(); });
+
+  function initSync() {
+    if (!cfgOk()) { showStatus(); return; }
+    loadSdk().then(function () {
+      var fb = window.firebase;
+      if (!(fb.apps && fb.apps.length)) fb.initializeApp(window.FIREBASE_CONFIG);
+      sync.auth = fb.auth(); sync.db = fb.firestore();
+      try { sync.db.settings({ experimentalAutoDetectLongPolling: true, merge: true }); } catch (e) {}
+      sync.ready = true;
+      acctUi(); showStatus();
+      sync.auth.onAuthStateChanged(function (u) { if (u) startSync(u); else stopSync(); }, function () {});
+    }).catch(function () { sync.ready = false; showStatus(); });
+  }
+
+  /* ---------- ekspor & impor ---------- */
   $('#exportBtn').addEventListener('click', function () {
     var data = JSON.stringify({ v: 2, auto: auto, rows: rows }, null, 2);
     var link = document.createElement('a');
@@ -923,6 +1136,9 @@ h1 { margin: 0; font: 600 1.7rem/1.15 var(--ui); text-wrap: balance; }
     };
     rd.readAsText(f);
   });
+
+  showStatus();
+  initSync();
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function () {

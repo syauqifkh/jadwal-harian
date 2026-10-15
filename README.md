@@ -2,35 +2,35 @@
 
 Jadwal dua kolom: hari dan task di kiri, waktu di kanan. Bisa dipasang di layar utama Android seperti aplikasi, dan tetap bisa dibuka tanpa internet.
 
-## Cara menayangkan di GitHub Pages (gratis)
+## Isi folder
 
-1. Masuk ke github.com, lalu buat repositori baru: tombol **New**.
-   - Nama: `jadwal-harian`
-   - Pilih **Public** (GitHub Pages gratis hanya untuk repositori publik).
-   - Klik **Create repository**.
-2. Di halaman repositori, klik **uploading an existing file**.
-3. Ekstrak file zip ini, lalu seret **semua file di dalam folder** (`index.html`, `sw.js`, `manifest.webmanifest`, dan tiga file ikon `.png`) ke halaman unggah. Klik **Commit changes**.
-4. Buka **Settings → Pages**.
-   - Source: **Deploy from a branch**
-   - Branch: **main**, folder **/ (root)**, lalu **Save**.
-5. Tunggu 1 sampai 2 menit. Alamat aplikasi muncul di halaman yang sama:
-   `https://NAMA-GITHUB-ANDA.github.io/jadwal-harian/`
+| File | Fungsi |
+|---|---|
+| `index.html` | Aplikasinya |
+| `firebase-config.js` | Tempat mengisi kode Firebase agar jadwal tersinkron antar perangkat |
+| `sw.js` | Membuat aplikasi bisa dibuka offline |
+| `manifest.webmanifest` dan tiga file `icon-*.png` | Membuat aplikasi bisa dipasang di layar utama |
+| `PANDUAN-FIREBASE.md` | Panduan lengkap menyamakan jadwal di HP dan laptop |
 
-## Memasang di Android
+## Langkah 1. Menayangkan di GitHub Pages (gratis)
 
-1. Buka alamat tadi di **Chrome** Android.
-2. Ketuk menu ⋮, lalu **Instal aplikasi** (atau **Tambahkan ke layar utama**).
-3. Ikon "Jadwal" muncul di layar utama.
+1. Di github.com, buat repositori baru bernama `jadwal-harian`, pilih **Public**, lalu **Create repository**.
+2. Klik **uploading an existing file**, lalu seret semua file di dalam folder ini (bukan foldernya) ke halaman unggah. Klik **Commit changes**.
+3. Buka **Settings → Pages**. Pilih **Deploy from a branch**, branch **main**, folder **/ (root)**, lalu **Save**.
+4. Tunggu 1 sampai 3 menit. Alamatnya `https://NAMA-GITHUB-ANDA.github.io/jadwal-harian/`.
 
-## Memindahkan jadwal Anda yang sekarang
+## Langkah 2. Memasang di Android
 
-Jangan unggah file jadwal pribadi ke GitHub, karena repositorinya publik.
+Buka alamat tadi di Chrome Android, ketuk menu ⋮, lalu pilih **Instal aplikasi** (atau **Tambahkan ke layar utama**).
 
-1. Simpan file `jadwal-saya.json` di HP.
-2. Buka aplikasi, ketuk **Impor**, lalu pilih file itu.
+## Langkah 3. Menyamakan jadwal di semua perangkat
 
-Gunakan **Ekspor** sesekali untuk mengunduh cadangan. Data disimpan di HP tempat aplikasi dibuka, jadi HP dan komputer memiliki jadwal yang terpisah. Impor file cadangan untuk memindahkannya.
+Ikuti `PANDUAN-FIREBASE.md`. Tanpa langkah ini, aplikasi tetap berfungsi, tetapi jadwal hanya tersimpan di perangkat yang dipakai.
+
+## Memindahkan jadwal yang sudah ada
+
+Jangan unggah file jadwal pribadi ke GitHub, karena repositorinya publik. Simpan di HP, buka aplikasi, ketuk **Impor**, lalu pilih filenya. Gunakan **Ekspor** sesekali untuk menyimpan cadangan.
 
 ## Memperbarui aplikasi
 
-Ganti file di repositori (**Add file → Upload files**), lalu ubah angka versi di bagian atas `sw.js` (misalnya `jadwal-harian-v2`) supaya HP mengambil versi baru.
+Ganti file di repositori (**Add file → Upload files**, nama file yang sama akan tertimpa), lalu ubah angka versi di bagian atas `sw.js` (misalnya `jadwal-harian-v3`) supaya HP mengambil versi baru. Setelah itu tutup aplikasi dan buka lagi dua kali. Jangan menimpa `firebase-config.js` yang sudah Anda isi, kecuali Anda mengisinya lagi.

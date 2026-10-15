@@ -1,9 +1,13 @@
 /* Ubah angka versi di bawah setiap kali file aplikasi diganti, supaya HP mengambil yang baru. */
-const CACHE = 'jadwal-harian-v1';
-const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
+const CACHE = 'jadwal-harian-v2';
+const SHELL = ['./', './index.html', './firebase-config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(SHELL.map((u) => c.add(u).catch(() => {}))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (e) => {
@@ -19,6 +23,7 @@ self.addEventListener('fetch', (e) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   const isFont = url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com';
+  const isSdk = url.hostname === 'www.gstatic.com' && url.pathname.startsWith('/firebasejs/');
 
   if (url.origin === self.location.origin) {
     // Online: ambil versi terbaru. Offline: pakai salinan tersimpan.
@@ -30,16 +35,18 @@ self.addEventListener('fetch', (e) => {
         })
         .catch(() => caches.match(req).then((hit) => hit || caches.match('./index.html')))
     );
-  } else if (isFont) {
+  } else if (isFont || isSdk) {
+    // Font dan pustaka Firebase: pakai salinan tersimpan, perbarui di belakang layar.
     e.respondWith(
       caches.open(CACHE).then((c) =>
         c.match(req).then((hit) => {
           const net = fetch(req)
-            .then((res) => { c.put(req, res.clone()); return res; })
+            .then((res) => { if (res.ok || res.type === 'opaque') c.put(req, res.clone()); return res; })
             .catch(() => hit);
           return hit || net;
         })
       )
     );
   }
+  // Permintaan lain (login dan database Firebase) tidak disentuh.
 });
